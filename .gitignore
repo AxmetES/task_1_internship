@@ -1,0 +1,11 @@
+.env
+.idea
+.venv
+**/__pycache__/
+shopkz.log
+products_urls.json
+products.temp
+test.py
+catalog.html
+product.html
+main.html
