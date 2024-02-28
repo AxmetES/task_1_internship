@@ -58,9 +58,9 @@ def check_url_in_file(url_to_check):
     return False
 
 
-def add_url_to_file(new_url):
+def add_url_to_file(file_name, new_url):
     try:
-        with open('products_urls.json', 'r') as file:
+        with open(file_name, 'r') as file:
             json_str = file.read()
     except FileNotFoundError:
         urls_list = []
@@ -68,8 +68,15 @@ def add_url_to_file(new_url):
         urls_list = json.loads(json_str) if json_str else []
     if new_url not in urls_list:
         urls_list.append(new_url)
-    with open('products_urls.json', 'w') as file:
+    with open(file_name, 'w') as file:
         json.dump(urls_list, file, indent=2)
+
+
+def read_from_file(file_name):
+    with open(file_name, 'r') as f:
+        json_str = f.read()
+    urls_list = json.loads(json_str) if json_str else []
+    return urls_list
 
 
 if __name__ == '__main__':
