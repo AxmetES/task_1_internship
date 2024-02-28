@@ -4,7 +4,6 @@ import random
 import time
 from datetime import datetime
 from urllib.parse import urljoin
-from playsound import playsound
 import requests
 from bs4 import BeautifulSoup
 
@@ -14,7 +13,6 @@ from utils import reload_request, read_html_file, write_to_file, convert_to_floa
 
 def get_catalog(s, main_url):
     r = reload_request(s, 'GET', main_url)
-    # html_content = read_html_file('main.html')
     soup = BeautifulSoup(r.text, 'lxml')
     div_catalog = soup.find('div', class_='quick_cat__items')
     catalog_urls = div_catalog.find_all('a')
@@ -92,7 +90,6 @@ def get_product(s, category_name, product_url):
         product_obj['updated_at'] = datetime.now()
         return product_obj
     except Exception as e:
-        playsound('strashnye-zvuki-1.mp3')
         print(f'{e}, page url:{product_url}')
         logging.exception(f'{e}, page url:{product_url}')
 
@@ -110,7 +107,6 @@ def get_products(s, category_name, catalog_products_urls):
         delay = random.uniform(1, 3)
         time.sleep(delay)
     if product_objs:
-        playsound('hahadone.mp3')
         bulk_insert_products(product_objs)
         logging.info(f'saved to DB: {product_objs}')
     delay = random.uniform(1, 3)
@@ -158,7 +154,6 @@ def main():
         print(f'Parsing finish: {datetime.now().time()}')
         logging.info(f'Parsing finish: {datetime.now().time()}')
     except Exception as e:
-        playsound('strashnye-zvuki-1.mp3')
         print(e)
         logging.error(e)
 
