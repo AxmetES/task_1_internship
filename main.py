@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from crud import create_table_product, bulk_insert_products
 from utils import reload_request, read_html_file, write_to_file, convert_to_float, check_url_in_file, add_url_to_file, \
-    read_from_file
+    read_from_file, make_img_for_db, get_category_name
 
 
 def get_catalog(s, main_url):
@@ -23,13 +23,7 @@ def get_catalog(s, main_url):
     return catalogs_urls
 
 
-def get_category_name(catalog_url):
-    category_name = catalog_url.split('/')
-    category_name = [item for item in category_name if item != '']
-    return category_name[-1]
-
-
-def get_product(s, category_name, product_url):
+def get_product(s, category_name, product_url, main_url):
     try:
         r = reload_request(s, 'GET', product_url)
         product_obj = {}
@@ -38,6 +32,9 @@ def get_product(s, category_name, product_url):
 
         title = div_container.find('div', class_='bx-title__container').text.strip()
         product_obj['title'] = title if title else None
+
+        image_url = div_container.find('div', class_='bx_bigimages_imgcontainer').find('span').find('img')['data-src']
+        product_obj['image'] = urljoin(main_url, image_url)
 
         article = div_container.find('ul', class_='bx-card-mark col-lg-4 col-xs-12 col-sm-6').find('li').text.strip()
         product_obj['article'] = article if article else None
@@ -95,43 +92,39 @@ def get_product(s, category_name, product_url):
         logging.exception(f'{e}, page url:{product_url}')
 
 
-def get_products(s, category_name, catalog_products_urls):
+def get_products(s, category_name, catalog_products_urls, main_url):
     product_objs = []
     random.shuffle(catalog_products_urls)
     for product_url in catalog_products_urls:
-        product_objs.append(get_product(s, category_name, product_url))
+        product_objs.append(get_product(s, category_name, product_url, main_url))
         logging.info(f'Add to db: {product_url}')
         delay = random.uniform(1, 3)
         time.sleep(delay)
-    if product_objs:
-        bulk_insert_products(product_objs)
-        logging.info(f'saved to DB: {product_objs}')
+    bulk_insert_products(product_objs)
+    logging.info(f'saved to DB: {product_objs}')
     delay = random.uniform(1, 3)
     time.sleep(delay)
 
 
-def get_catalog_products(s, catalogs_urls, main_url):
-    random.shuffle(catalogs_urls)
-    for catalog_url in catalogs_urls:
-        category_name = get_category_name(catalog_url)
-        r = reload_request(s, 'GET', catalog_url)
+def get_catalog_products(s, catalog_url, main_url, catalog_name):
+    r = reload_request(s, 'GET', catalog_url)
+    soup = BeautifulSoup(r.text, 'lxml')
+    div_pages = soup.find('div', class_='bx-pagination-container row')
+    if div_pages:
+        div_pages = div_pages.find('ul').find_all('li')
+    total_pages = int(div_pages[-2].text) if div_pages else 1
+    page = 2
+    while True:
+        dev_products = [div.find('a')['href'] for div in soup.find_all('div', class_='bx_catalog_item_title')]
+        catalog_products_urls = [urljoin(main_url, url) for url in dev_products]
+        logging.info(f'current catalog-page: {catalog_name} - {page}')
+        get_products(s, catalog_name, catalog_products_urls, main_url)
+        if page > total_pages:
+            break
+        params = {"PAGEN_1": page}
+        r = reload_request(s, 'GET', catalog_url, params=params)
         soup = BeautifulSoup(r.text, 'lxml')
-        div_pages = soup.find('div', class_='bx-pagination-container row')
-        if div_pages:
-            div_pages = div_pages.find('ul').find_all('li')
-        total_pages = int(div_pages[-2].text) if div_pages else 1
-        page = 2
-        while True:
-            dev_products = [div.find('a')['href'] for div in soup.find_all('div', class_='bx_catalog_item_title')]
-            catalog_products_urls = [urljoin(main_url, url) for url in dev_products]
-            logging.info(f'current catalog-page: {category_name} - {page}')
-            get_products(s, category_name, catalog_products_urls)
-            if page > total_pages:
-                break
-            params = {"PAGEN_1": page}
-            r = reload_request(s, 'GET', catalog_url, params=params)
-            soup = BeautifulSoup(r.text, 'lxml')
-            page += 1
+        page += 1
 
 
 def get_sub_catalog_urls(s, catalog_url, main_url):
@@ -143,7 +136,6 @@ def get_sub_catalog_urls(s, catalog_url, main_url):
 
 
 def main():
-    sub_sub_catalogs_urls = []
     try:
         create_table_product()
         main_url = 'https://shop.kz/'
@@ -159,12 +151,16 @@ def main():
         random.shuffle(catalogs_urls)
         for catalog_url in catalogs_urls:
             sub_catalogs_urls = get_sub_catalog_urls(s, catalog_url, main_url)
+            random.shuffle(sub_catalogs_urls)
             for sub_catalog_url in sub_catalogs_urls:
-                sub_sub_catalogs_urls.extend(get_sub_catalog_urls(s, sub_catalog_url, main_url))
+                sub_sub_catalogs_urls = get_sub_catalog_urls(s, sub_catalog_url, main_url)
                 logging.info('len sub_sub_catalogs_urls: f{len(sub_sub_catalogs_urls)}')
+                random.shuffle(sub_sub_catalogs_urls)
+                for sub_sub_catalog_url in sub_sub_catalogs_urls:
+                    catalog_name = get_category_name(sub_catalog_url)
+                    get_catalog_products(s, sub_sub_catalog_url, main_url, catalog_name)
                 delay = random.uniform(1, 3)
                 time.sleep(delay)
-        get_catalog_products(s, sub_sub_catalogs_urls, main_url)
         logging.info(f'Parsing finish: {datetime.now().time()}')
     except Exception as e:
         logging.error(e)

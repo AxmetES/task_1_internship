@@ -9,8 +9,9 @@ def create_table_product():
             cursor.execute('''CREATE TABLE IF NOT EXISTS product (
                 id SERIAL PRIMARY KEY,
                 exist BOOLEAN,
-                title TEXT,
-                article TEXT,
+                title VARCHAR(150) UNIQUE,
+                image VARCHAR(150),
+                article VARCHAR(100),
                 price_list NUMERIC(10, 2),
                 price_in_chain_stores NUMERIC(10, 2),
                 price_in_the_online_store NUMERIC(10, 2),
@@ -18,7 +19,7 @@ def create_table_product():
                 details JSON,
                 description TEXT,
                 url TEXT,
-                category_name TEXT,
+                category_name VARCHAR(100),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                   )''')
@@ -45,6 +46,7 @@ def bulk_insert_products(products):
             insert_query = '''INSERT INTO product (
                                 exist,
                                 title,
+                                image,
                                 article,
                                 price_list,
                                 price_in_chain_stores,
@@ -56,10 +58,11 @@ def bulk_insert_products(products):
                                 url,
                                 created_at,
                                 updated_at) 
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                     ON CONFLICT (title) DO NOTHING;'''
             cursor.executemany(insert_query, [(p['exist'],
                                                p['title'],
+                                               p['image'],
                                                p['article'],
                                                p['price_list'],
                                                p['price_in_chain_stores'],

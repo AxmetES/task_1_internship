@@ -1,9 +1,15 @@
+import base64
 import json
 import os
 import time
 import random
+from urllib.parse import urljoin
+
 import requests
 from decimal import Decimal
+
+
+main_url = 'https://shop.kz/'
 
 
 def reload_request(s, method, url, data=None, params=None):
@@ -77,6 +83,20 @@ def read_from_file(file_name):
         json_str = f.read()
     urls_list = json.loads(json_str) if json_str else []
     return urls_list
+
+
+def make_img_for_db(image_url):
+    image_url = urljoin(main_url, image_url)
+    return image_url
+    # response = requests.get(image_url)
+    # if response.status_code == 200:
+    #     return base64.b64encode(response.content).decode('utf-8')
+
+
+def get_category_name(catalog_url):
+    category_name = catalog_url.split('/')
+    category_name = [item for item in category_name if item != '']
+    return category_name[-1]
 
 
 if __name__ == '__main__':
