@@ -2,14 +2,14 @@ import json
 import logging
 import random
 import time
+import requests
 from datetime import datetime
 from urllib.parse import urljoin
-import requests
 from bs4 import BeautifulSoup
 
-from crud import create_table_product, bulk_insert_products
-from utils import reload_request, read_html_file, write_to_file, convert_to_float, check_url_in_file, add_url_to_file, \
-    read_from_file, make_img_for_db, get_category_name
+from db.crud import bulk_insert_products, get_or_create_category
+from db.engine import create_db
+from utils import reload_request, convert_to_float, get_category_name, write_to_file
 
 
 def get_catalog(s, main_url):
@@ -23,7 +23,7 @@ def get_catalog(s, main_url):
     return catalogs_urls
 
 
-def get_product(s, category_name, product_url, main_url):
+def get_product(s, category_obj, product_url, main_url):
     try:
         r = reload_request(s, 'GET', product_url)
         product_obj = {}
@@ -34,17 +34,10 @@ def get_product(s, category_name, product_url, main_url):
         product_obj['title'] = title if title else None
 
         image_url = div_container.find('div', class_='bx_bigimages_imgcontainer').find('span').find('img')['data-src']
-        product_obj['image'] = urljoin(main_url, image_url)
+        product_obj['image'] = urljoin(main_url, image_url) if image_url else None
 
         article = div_container.find('ul', class_='bx-card-mark col-lg-4 col-xs-12 col-sm-6').find('li').text.strip()
         product_obj['article'] = article if article else None
-
-        img_url = 'https:' + div_container.find(
-            'div',
-            class_='bx_bigimages_imgcontainer').find('img').get('data-src') if div_container.find(
-            'div',
-            class_='bx_bigimages_imgcontainer').find('img') else None
-        product_obj['img_url'] = img_url if img_url else None
 
         product_obj['exist'] = True
         div_exist = div_container.find('div', class_='bx-item-buttons')
@@ -75,6 +68,7 @@ def get_product(s, category_name, product_url, main_url):
                     continue
         divs_details = div_container.find_all('div', class_='bxe-tabs__content')
         div_details = divs_details[0].find_all('div', class_='bx_detail_chars_i') if divs_details[0] else None
+
         details = {}
         if div_details:
             for div_detail in div_details:
@@ -83,32 +77,30 @@ def get_product(s, category_name, product_url, main_url):
                 details[dt] = dd
         product_obj['details'] = json.dumps(details, ensure_ascii=False) if details else None
         product_obj['description'] = divs_details[1].get_text(strip=True) if div_details[1] else None
-        product_obj['category_name'] = category_name
+        product_obj['category_id'] = category_obj.id
         product_obj['url'] = product_url
         product_obj['created_at'] = datetime.now()
         product_obj['updated_at'] = datetime.now()
+        logging.info(f'product url: {product_url}')
         return product_obj
     except Exception as e:
         logging.exception(f'{e}, page url:{product_url}')
 
 
-def get_products(s, category_name, catalog_products_urls, main_url):
+def get_products(s, category_obj, catalog_products_urls, main_url):
     product_objs = []
     random.shuffle(catalog_products_urls)
     for product_url in catalog_products_urls:
-        product_objs.append(get_product(s, category_name, product_url, main_url))
-        logging.info(f'Add to db: {product_url}')
-        delay = random.uniform(1, 3)
-        time.sleep(delay)
+        product_objs.append(get_product(s, category_obj, product_url, main_url))
     bulk_insert_products(product_objs)
-    logging.info(f'saved to DB: {product_objs}')
-    delay = random.uniform(1, 3)
-    time.sleep(delay)
 
 
-def get_catalog_products(s, catalog_url, main_url, catalog_name):
+def get_catalog_products(s, catalog_url, main_url):
     r = reload_request(s, 'GET', catalog_url)
     soup = BeautifulSoup(r.text, 'lxml')
+    catalog_rus = soup.find('div', class_='bx-title__container').get_text(strip=True).lower()
+    category = get_category_name(catalog_rus, catalog_url)
+    category_obj = get_or_create_category(category)
     div_pages = soup.find('div', class_='bx-pagination-container row')
     if div_pages:
         div_pages = div_pages.find('ul').find_all('li')
@@ -117,8 +109,8 @@ def get_catalog_products(s, catalog_url, main_url, catalog_name):
     while True:
         dev_products = [div.find('a')['href'] for div in soup.find_all('div', class_='bx_catalog_item_title')]
         catalog_products_urls = [urljoin(main_url, url) for url in dev_products]
-        logging.info(f'current catalog-page: {catalog_name} - {page}')
-        get_products(s, catalog_name, catalog_products_urls, main_url)
+        logging.info(f'current catalog-page: {catalog_rus} - {page}')
+        get_products(s, category_obj, catalog_products_urls, main_url)
         if page > total_pages:
             break
         params = {"PAGEN_1": page}
@@ -131,13 +123,23 @@ def get_sub_catalog_urls(s, catalog_url, main_url):
     r = reload_request(s, 'GET', catalog_url)
     soup = BeautifulSoup(r.text, 'lxml')
     dev_sub_catalog = soup.find('div', class_='bx_catalog_tile').find_all('li')
+    sub_catalog_urls = {}
+    for div in dev_sub_catalog:
+        sub_catalog_urls[div.text.replace('\n', '')] = urljoin(main_url, div.find('a')['href'])
     sub_catalogs_urls = [urljoin(main_url, x.find('a')['href']) for x in dev_sub_catalog]
     return sub_catalogs_urls
 
 
+def get_sub_catalog_urls_all(s, catalog_url, main_url):
+    r = reload_request(s, 'GET', catalog_url)
+    soup = BeautifulSoup(r.text, 'lxml')
+    sub_catalog_devs = soup.find('div', class_='bx_catalog_tile').find_all('li')
+    return sub_catalog_devs
+
+
 def main():
     try:
-        create_table_product()
+        create_db()
         main_url = 'https://shop.kz/'
         s = requests.Session()
         s.headers.update({
@@ -157,8 +159,7 @@ def main():
                 logging.info('len sub_sub_catalogs_urls: f{len(sub_sub_catalogs_urls)}')
                 random.shuffle(sub_sub_catalogs_urls)
                 for sub_sub_catalog_url in sub_sub_catalogs_urls:
-                    catalog_name = get_category_name(sub_catalog_url)
-                    get_catalog_products(s, sub_sub_catalog_url, main_url, catalog_name)
+                    get_catalog_products(s, sub_sub_catalog_url, main_url)
                 delay = random.uniform(1, 3)
                 time.sleep(delay)
         logging.info(f'Parsing finish: {datetime.now().time()}')
@@ -166,23 +167,36 @@ def main():
         logging.error(e)
 
 
+def get_sub_catalogs_urls():
+    sub_catalog_urls = {}
+    main_url = 'https://shop.kz/'
+    s = requests.Session()
+    s.headers.update({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    })
+    catalogs_urls = get_catalog(s, main_url)
+    random.shuffle(catalogs_urls)
+    for catalog_url in catalogs_urls:
+        sub_catalog_devs = get_sub_catalog_urls_all(s, catalog_url, main_url)
+        sub_catalogs_urls = [urljoin(main_url, x.find('a')['href']) for x in sub_catalog_devs]
+
+        random.shuffle(sub_catalogs_urls)
+        for sub_catalog_url in sub_catalogs_urls:
+            sub_sub_catalog_devs = get_sub_catalog_urls_all(s, sub_catalog_url, main_url)
+            for div in sub_sub_catalog_devs:
+                sub_catalog_urls[div.text.replace('\n', '')] = urljoin(main_url, div.find('a')['href'])
+    write_to_file('sub_catalogs_url.json', sub_catalog_urls)
+
+
 if __name__ == '__main__':
     logging.basicConfig(
-        filename="shopkz.log",
+        filename="logs/shopkz.log",
         level=logging.DEBUG,
         format="%(asctime)s - %(levelname)s - %(message)s",
         encoding="utf-8",
     )
     main()
-    # main_url = 'https://shop.kz/'
-    # s = requests.Session()
-    # s.headers.update({
-    #     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    #     'Accept-Encoding': 'gzip, deflate, br, zstd',
-    #     'Accept-Language': 'en-US,en;q=0.9',
-    #     'Cache-Control': 'no-cache',
-    #     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-    # })
-    # sub_sub_catalogs_urls = ['https://shop.kz/offers/naushniki-i-garnitury/naushniki-dlya-telefonov/']
-    # sub_sub_catalogs_urls = read_from_file('catalogs_urls.json')
-    # get_catalog_products(s, sub_sub_catalogs_urls, main_url)

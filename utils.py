@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 import requests
 from decimal import Decimal
 
+from db.models import Category
 
 main_url = 'https://shop.kz/'
 
@@ -17,6 +18,8 @@ def reload_request(s, method, url, data=None, params=None):
         methods = {'GET': s.get, 'POST': s.post}
         r = methods[method](url, data=data, params=params)
         r.raise_for_status()
+        delay = random.uniform(1, 3)
+        time.sleep(delay)
         return r
     except requests.exceptions.HTTPError as errh:
         print(f"HTTP Error: {errh}")
@@ -34,16 +37,15 @@ def read_html_file(html_file):
         return html_content
 
 
-def write_to_file(urs, file_name):
-    existing_lines = set()
-    if os.path.exists(file_name):
-        with open(file_name, 'r', encoding='utf-8') as existing_file:
-            existing_lines = set(line.strip() for line in existing_file)
-    existing_lines.update(line.strip() for line in urs)
-    with open(file_name, 'w', encoding='utf-8') as temp_file:
-        for line in existing_lines:
-            temp_file.write(line)
-            temp_file.write('\n')
+def write_to_file(file_name, data):
+    if not os.path.exists(file_name):
+        with open(file_name, 'w') as file:
+            json.dump([], file)
+    with open(file_name, 'r') as file:
+        existing_data = json.load(file)
+    existing_data.append(data)
+    with open(file_name, 'w') as file:
+        json.dump(existing_data, file, indent=4, ensure_ascii=False)
 
 
 def convert_to_float(str_):
@@ -93,12 +95,36 @@ def make_img_for_db(image_url):
     #     return base64.b64encode(response.content).decode('utf-8')
 
 
-def get_category_name(catalog_url):
+def make_slug_shorter(catalog):
+    if catalog.count('-') >= 3:
+        catalog = catalog.split('-')
+        catalog = '-'.join([catalog[0], catalog[-1]])
+        return catalog
+    return catalog
+
+
+def get_category_name(catalog_rus, catalog_url):
     category_name = catalog_url.split('/')
     category_name = [item for item in category_name if item != '']
-    return category_name[-1]
+    catalog_name = make_slug_shorter(category_name[-1])
+    category_obj = Category(
+        catalog_name=catalog_name,
+        catalog_rus=catalog_rus
+    )
+    return category_obj
+
+
+def convert_url_to_category_name():
+    catalogs_text = ''
+    with open('catalogs_urls.json', 'r') as f:
+        catalog_urls = json.load(f)
+        for catalog_url in catalog_urls:
+            catalogs = catalog_url.split('/')
+            catalog_name = [catalog for catalog in catalogs if catalog != ''][-1]
+            catalogs_text += catalog_name + '\n'
+    with open('catalogs.text', 'w') as f:
+        f.write(catalogs_text)
 
 
 if __name__ == '__main__':
-    s = requests.Session()
-    reload_request(s, 'GET', 'http://example.com')
+    convert_url_to_category_name()
